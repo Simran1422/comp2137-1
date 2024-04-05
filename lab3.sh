@@ -1,78 +1,57 @@
 #!/bin/bash
 
-# Function to display usage information
-usage() {
-    echo "Usage: $0 [-v]"
-    echo "Options:"
-    echo "  -v      Run in verbose mode"
-    exit 1
-}
+# Define remote server details
+SERVER1_USER="remoteadmin"
+SERVER1_HOST="server1-mgmt"
+SERVER2_USER="remoteadmin"
+SERVER2_HOST="server2-mgmt"
 
-# Default values
-VERBOSE=false
+# Location to copy the script on the remote server
+REMOTE_SCRIPT_PATH="/root/configure-host.sh"
 
-# Parse command-line options
-while getopts ":v" opt; do
-    case ${opt} in
-        v )
-            VERBOSE=true
-            ;;
-        \? )
-            usage
-            ;;
-    esac
-done
-shift $((OPTIND -1))
+# Verbose mode flag
+VERBOSE=""
 
-# Function to execute remote commands
-execute_remote() {
-    local remote_host="$1"
-    local command="$2"
-    if $VERBOSE; then
-        ssh "$remote_host" -- "$command" -verbose
-    else
-        ssh "$remote_host" -- "$command"
+# Check for verbose flag in command-line arguments
+for arg in "$@"; do
+    if [ "$arg" == "-verbose" ]; then
+        VERBOSE="-verbose"
+        echo "Verbose mode enabled"
     fi
-}
+done
 
-# Transfer and execute configure-host.sh script on each server
+# Function to transfer and execute the configure-host.sh script
 deploy_and_configure() {
-    local server="$1"
-    local name="$2"
-    local ip="$3"
-    local hostentry_name="$4"
-    local hostentry_ip="$5"
+    local user=$1
+    local host=$2
+    local name=$3
+    local ip=$4
+    local hostentry_name=$5
+    local hostentry_ip=$6
 
-    # Transfer script to server
-    scp configure-host.sh remoteadmin@"$server":/root
-
-    # Execute script remotely with specified options
-    execute_remote "remoteadmin@$server" "/root/configure-host.sh -name $name -ip $ip -hostentry $hostentry_name $hostentry_ip"
-}
-
-# Main function
-main() {
-    # Check if configure-host.sh exists
-    if [ ! -f "configure-host.sh" ]; then
-        echo "Error: configure-host.sh script not found."
+    # Securely copy the script to the server
+    scp configure-host.sh ${user}@${host}:${REMOTE_SCRIPT_PATH}
+    if [ $? -ne 0 ]; then
+        echo "Error copying configure-host.sh to ${host}"
         exit 1
     fi
-    
-    # Deploy and configure on server1-mgmt
-    deploy_and_configure "server1-mgmt" "loghost" "192.168.16.3" "webhost" "192.168.16.4"
-    
-    # Deploy and configure on server2-mgmt
-    deploy_and_configure "server2-mgmt" "webhost" "192.168.16.4" "loghost" "192.168.16.3"
 
-    # Update /etc/hosts on local machine
-    ./configure-host.sh -hostentry loghost 192.168.16.3
-    ./configure-host.sh -hostentry webhost 192.168.16.4
+    # Execute the script remotely with specified options
+    ssh ${user}@${host} "bash ${REMOTE_SCRIPT_PATH} ${VERBOSE} -name ${name} -ip ${ip} -hostentry ${hostentry_name} ${hostentry_ip}"
+    if [ $? -ne 0 ]; then
+        echo "Error executing configure-host.sh on ${host}"
+        exit 1
+    fi
 }
 
-# Check if verbose mode is enabled
-if $VERBOSE; then
-    echo "Verbose mode enabled."
-fi
+# Deploy and configure on server1
+deploy_and_configure $SERVER1_USER $SERVER1_HOST "loghost" "192.168.16.3" "webhost" "192.168.16.4"
 
-# Execute main function
-main
+# Deploy and configure on server2
+deploy_and_configure $SERVER2_USER $SERVER2_HOST "webhost" "192.168.16.4" "loghost" "192.168.16.3"
+
+# Update local /etc/hosts file
+./configure-host.sh $VERBOSE -hostentry "loghost" "192.168.16.3"
+./configure-host.sh $VERBOSE -hostentry "webhost" "192.168.16.4"
+
+echo "Deployment complete."
